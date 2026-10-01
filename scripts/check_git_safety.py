@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 SENSITIVE_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".zip", ".pth", ".pt"
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".zip", ".pth", ".pt", ".ckpt", ".onnx"
 }
 SOURCE_EXTENSIONS = {".py"}
 ABSOLUTE_WINDOWS_PATH = re.compile(r"\b[A-Za-z]:[\\/]")

@@ -19,6 +19,8 @@ local_outputs/
 checkpoints/
 *.pth
 *.pt
+*.ckpt
+*.onnx
 __pycache__/
 *.py[cod]
 

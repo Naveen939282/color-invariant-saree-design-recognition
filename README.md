@@ -1,6 +1,6 @@
 # AIE-CASE: Color-Invariant Saree Design Recognition
 
-Dataset inspection and preparation tools for a PyTorch image retrieval and verification task. This repository prepares metadata, human-confirmed design labels, leakage-resistant splits, and verification pairs; it does not train the retrieval model.
+Dataset preparation, PyTorch embedding training, and evaluation for a color-invariant saree design retrieval and verification task. The identity target is the underlying textile design (`design_id`), not its colorway.
 
 ## Proprietary Data
 
@@ -10,17 +10,19 @@ The original workspace ZIP was already present when this project work began and 
 
 ## Install
 
-The audit and split workflows need only pandas and Pillow:
+The basic audit and split workflow uses pandas and Pillow. Install its requirements with:
 
 ```shell
 python -m pip install -r requirements.txt
 ```
 
-The optional ResNet embedding helper has separate dependencies and may download pretrained weights on its first run:
+For model training and evaluation, use the model requirements command:
 
 ```shell
 python -m pip install -r requirements-similarity.txt
 ```
+
+In the current checkout, `requirements.txt` also lists NumPy, scikit-learn, matplotlib, PyTorch, and torchvision; `requirements-similarity.txt` currently includes `requirements.txt` and adds no further packages. The commands are shown separately for the basic-data and model workflows, but the files presently resolve to overlapping dependencies.
 
 ## Inspect One or Both Sources
 
@@ -79,6 +81,53 @@ python scripts/validate_dataset.py --metadata metadata/image_metadata.csv --labe
 ```
 
 The validator checks missing/unreadable/changed files, duplicate IDs/paths/content, blank and invalid labels, singleton designs, source-root escapes, design and image leakage, gallery/query and train/query overlap, pair correctness, and pair counts. Colorway blanks or a lack of cross-color positives are reported as warnings; missing design labels, duplicates that can leak, and invalid pairs fail validation.
+
+## Model Training
+
+The embedding model is for retrieval and verification of the same underlying design across palettes; it does not classify a fixed set of design IDs. It uses an ImageNet-pretrained ResNet18 backbone and a learned projection head to produce 128-dimensional L2-normalized embeddings. Contrastive learning trains on balanced positive and negative image pairs: positive pairs share a human-confirmed `design_id`, while negative pairs have different design IDs. Cross-color positive pairs are preferred when available. The backbone is frozen initially.
+
+Two input strategies are implemented:
+
+- **Grayscale baseline:** RGB is converted to grayscale, replicated into three channels, and passed through pretrained ResNet18 preprocessing.
+- **Trained color-augmentation model:** RGB is retained while brightness, contrast, saturation, and hue vary during training. Geometry is conservative: a near-full-frame crop is used, and horizontal flipping is opt-in to avoid changing directional textile layouts.
+
+The actual CPU training configuration was:
+
+- Epochs: 10
+- Batch size: 8 pairs
+- Pairs per epoch: 64
+- Validation pairs: 64
+- Embedding dimension: 128
+- Random seed: 42
+- Training split: `metadata/train.csv`
+- Validation split: `metadata/validation.csv`
+- Output directory: `local_outputs/model`
+- Device: CPU
+
+Run the same training command with an external DeepLure root:
+
+```powershell
+python scripts/train_embedding.py `
+  --deeplure-root "$env:USERPROFILE\DeepLureData\deeplure" `
+  --train-csv metadata\train.csv `
+  --validation-csv metadata\validation.csv `
+  --output-dir local_outputs\model `
+  --epochs 10 `
+  --batch-size 8 `
+  --pairs-per-epoch 64 `
+  --validation-pairs 64 `
+  --embedding-dim 128 `
+  --seed 42 `
+  --device cpu
+```
+
+The best checkpoint is written to `local_outputs/model/best_model.pt`; the training configuration and loss history are saved beside it. `local_outputs/` is intentionally ignored by Git because it contains local model and evaluation artifacts. Do not commit those artifacts.
+
+The workflow is: install basic dependencies, install model dependencies, prepare and validate metadata/splits using the sections above, train from the train and validation CSVs, then evaluate against the held-out gallery, query, and verification pairs. Training does not load the evaluation images or labels.
+
+Evaluation compares the grayscale ResNet18 baseline with the trained color-augmentation model. Retrieval metrics include Recall@1/3/5 and MRR; verification metrics include ROC-AUC, EER, and threshold-based precision/recall/F1. The cosine threshold is selected on validation pairs, not evaluation pairs.
+
+In the measured task experiment, both models had Recall@1 0.3611 and cross-color Recall@1 0.3958. The trained model had Recall@3 0.9167 versus 0.8750 for the grayscale baseline, and ROC-AUC 0.9951 versus 0.9914. These are results for this split, not a general performance claim: evaluation contained only 6 queries and 108 verification pairs. See [reports/experiment_results.md](reports/experiment_results.md) for the comparison and caveats.
 
 ## Optional Similarity Suggestions
 

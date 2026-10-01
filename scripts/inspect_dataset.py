@@ -1,6 +1,9 @@
 """Convenience entry point for recursively inspecting one or both data sources."""
 
-from generate_metadata import main
+try:
+    from .generate_metadata import main
+except ImportError:
+    from generate_metadata import main
 
 
 if __name__ == "__main__":
