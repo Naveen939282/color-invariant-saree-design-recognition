@@ -1,0 +1,28 @@
+# Local/proprietary dataset files
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.zip
+data/
+
+# Python-generated cache files
+__pycache__/
+*.py[cod]
+
+# Generated dataset-specific artifacts
+dataset_audit_output/
+dataset_splits/
+design_review_pages/
+image_metadata.csv
+dataset_summary.txt
+design_labels_template.csv
+design_labels.csv
+design_review.csv
+design_review.html
+candidate_pairs.csv
+train.csv
+validation.csv
+gallery.csv
+query.csv
+verification_pairs.csv
