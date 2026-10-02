@@ -1,10 +1,39 @@
 # AIE-CASE: Color-Invariant Saree Design Recognition
 
-Dataset preparation, PyTorch embedding training, and evaluation for a color-invariant saree design retrieval and verification task. The identity target is the underlying textile design (`design_id`), not its colorway.
+Dataset preparation, PyTorch embedding training, and evaluation for saree image retrieval and verification, with a focus on robustness to color changes. The original DeepLure pipeline uses human-confirmed textile-design identities. The isolated public Kaggle experiment uses filename-derived candidate identities only and is a controlled synthetic color-invariance evaluation, not a real-world cross-color benchmark.
 
 ## 500-Character Approach Note
 
-ImageNet-pretrained ResNet18 maps each saree to a 128-D L2-normalized embedding. Contrastive learning uses human-confirmed same-design positives and different-design negatives, prioritizing positives across colorways. The trainable RGB model uses brightness, contrast, saturation, hue, and conservative geometry augmentation; a grayscale, three-channel ResNet18 baseline is compared. Retrieval ranks gallery embeddings for each query, and verification scores labeled image pairs.
+Original DeepLure trains ImageNet-pretrained ResNet18 contrastive embeddings using human-confirmed same-design positives and different-design negatives, compared with a grayscale baseline. The separate public Kaggle experiment audits category-only data and compares frozen/trained embeddings on fixed synthetic color perturbations using filename-derived candidate identities. It is not a real-world cross-color benchmark.
+
+## Independent Public Kaggle Experiment
+
+This experiment is isolated from the original DeepLure pipeline. Its public Roboflow/Kaggle archive contains 1,470 members: 1,468 RGB 640x640 images and two README files. The four labels are textile categories, not individual saree design IDs: Banarasi (489), Bandhani (316), Ikat (342), and Pichwai (321).
+
+Because the archive supplies no verified design IDs, Roboflow-hash-stripped, class-scoped filenames define 606 **candidate experiment identities**. They do not establish real-world design identity. The audited splits contain 431 train, 115 validation, and 60 test candidates, with no candidate group crossing splits. One canonical image is selected per group; noisy sibling files are not additional identities.
+
+The ten fixed non-identity transformations are brightness decrease/increase (0.75/1.25), saturation decrease/increase (0.65/1.35), hue negative/positive (-0.10/+0.10 cycle), contrast decrease/increase (0.80/1.20), grayscale, and combined moderate (brightness 1.10, saturation 1.15, hue +0.05 cycle, contrast 1.10). The identity transform is the unchanged control.
+
+**The Kaggle experiment should not be interpreted as a real-world cross-color design-recognition benchmark. Its transformed query/gallery pairs are synthetic controlled perturbations used to test color-invariance behavior.** The transformed query and its canonical gallery item come from the same source image; they are not genuine cross-color saree pairs.
+
+### Frozen Baseline and Trained Model
+
+The frozen baseline uses `torchvision.models.resnet18` with `ResNet18_Weights.IMAGENET1K_V1`, classifier removed, native 512-D pooled features, L2 normalization, eval/inference mode, and no trainable parameters. It uses the weights' ImageNet preprocessing: resize 256, bilinear interpolation, center crop 224, RGB tensor conversion, and ImageNet mean/std normalization. The baseline verification threshold `0.84651804` was selected on validation non-identity pairs only.
+
+The trained model uses the same pretrained backbone and a jointly trained `Linear(512, 128)` projection followed by L2 normalization. Supervised contrastive batches use canonical/transformed views of one candidate identity as positives and other candidate identities as negatives. Configuration: 10 epochs, batch size 8 image views, AdamW, learning rate `1e-4`, weight decay `1e-4`, temperature `0.07`, seed 42, CPU. The checkpoint was selected using validation overall non-identity Recall@1; test data was not used for training or checkpoint selection. A single validation-selected threshold (`0.77639711`) was applied unchanged to all test transformations. Neither threshold should be interpreted as universally optimal.
+
+### Measured Results
+
+| Protocol | Recall@1 | Recall@3 | Recall@5 | ROC-AUC | F1 |
+|---|---:|---:|---:|---:|---:|
+| Frozen baseline, overall non-identity | 0.9933 | 1.0000 | 1.0000 | 0.9985 | 0.8993 |
+| Trained model, overall non-identity | 0.9900 | 1.0000 | 1.0000 | 0.9994 | 0.9344 |
+| Frozen baseline, grayscale | 0.9667 | 1.0000 | 1.0000 | 0.9962 | 0.4416 |
+| Trained model, grayscale | 0.9500 | 1.0000 | 1.0000 | 0.9973 | 0.8000 |
+
+Overall R@1 decreased by 0.0033; R@3/R@5 were unchanged; ROC-AUC increased by 0.0009 and F1 by 0.0351. Across 60 transformation/metric comparisons, 14 improved, 35 were unchanged, and 11 regressed. Grayscale verification F1 improved substantially while grayscale R@1 decreased slightly. Results are mixed and do not support a universal-improvement claim. Full per-transformation values are in [`public_kaggle_experiment/training_report.md`](public_kaggle_experiment/training_report.md).
+
+The trained model has 11,242,176 trainable parameters and a 128-D embedding; the frozen baseline feature extractor has 11,176,512 parameters. CPU training-loop time summed across epochs was 1,205.9 s, validation time 789.3 s, and combined recorded epoch time 1,995.2 s. This is not total wall-clock time; initialization and final evaluation are excluded. CPU forward-only median latency was 1,013.44 ms/batch for the baseline and 1,022.2 ms/batch for the trained checkpoint, both at batch size 32 after 10 warmups and 50 timed batches. Timing excludes preprocessing and is hardware-dependent.
 
 ## Proprietary Data
 
