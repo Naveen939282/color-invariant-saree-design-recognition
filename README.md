@@ -2,11 +2,15 @@
 
 Dataset preparation, PyTorch embedding training, and evaluation for a color-invariant saree design retrieval and verification task. The identity target is the underlying textile design (`design_id`), not its colorway.
 
+## 500-Character Approach Note
+
+ImageNet-pretrained ResNet18 maps each saree to a 128-D L2-normalized embedding. Contrastive learning uses human-confirmed same-design positives and different-design negatives, prioritizing positives across colorways. The trainable RGB model uses brightness, contrast, saturation, hue, and conservative geometry augmentation; a grayscale, three-channel ResNet18 baseline is compared. Retrieval ranks gallery embeddings for each query, and verification scores labeled image pairs.
+
 ## Proprietary Data
 
 The DeepLure Drive corpus is proprietary third-party data. Keep the original archive and all extracted DeepLure images outside this Git repository. Never commit or redistribute them, and do not create public image URLs. `.gitignore` blocks common image/archive/model files, and `scripts/check_git_safety.py` checks tracked and local workspace files. Metadata and documentation may be reviewed and committed; image files, archives, contact sheets, and model weights must not be.
 
-The original workspace ZIP was already present when this project work began and remains ignored, not tracked. Prefer moving it and all extracted files outside the repository. The previously extracted working copy was moved to `%USERPROFILE%\DeepLureData\deeplure` on this machine.
+The original DeepLure ZIP and all extracted images must remain outside this repository. The configured local data root is `%USERPROFILE%\DeepLureData\deeplure`.
 
 ## Install
 
@@ -104,7 +108,66 @@ The actual CPU training configuration was:
 - Output directory: `local_outputs/model`
 - Device: CPU
 
-Run the same training command with an external DeepLure root:
+The exact training command is included in [Reproduce the Reported Experiment](#reproduce-the-reported-experiment).
+
+The best checkpoint is written to `local_outputs/model/best_model.pt`; the training configuration and loss history are saved beside it. `local_outputs/` is intentionally ignored by Git because it contains local model and evaluation artifacts. Do not commit those artifacts.
+
+Training reads only `metadata/train.csv`; checkpoint selection uses `metadata/validation.csv`. Gallery, query, and verification evaluation data are not used for training or checkpoint selection.
+
+## Evaluation Protocol
+
+The current saved split has 117 training images from 34 designs and 24 validation images from 6 designs. The held-out evaluation contains 6 query images and 18 gallery images, each covering the same 6 evaluation designs. One image per evaluation design is the query; the remaining images for that design form its gallery. Train, validation, and evaluation design IDs are disjoint, and no image is shared between gallery and query.
+
+Identification ranks every gallery embedding by cosine similarity for each query. A result is relevant when query and gallery have the same human-confirmed `design_id`, regardless of colorway. Reported identification metrics are Recall@1, Recall@3, Recall@5, and MRR. Cross-color Recall@1 restricts relevant gallery items to those with a different nonblank manually labeled colorway.
+
+Verification positives have the same `design_id`; negatives have different `design_id`. The current evaluation has 18 positive pairs and 90 negative pairs, with 11 positives crossing labeled colorways. Fifteen designs have only one image in the full dataset and cannot produce positive image pairs.
+
+Each model's cosine threshold is selected by maximum F1 over all unordered validation-image pairs (276 pairs in this split). That threshold is then fixed before scoring the held-out verification pairs. Evaluation pairs are not used for threshold selection. Verification reports ROC-AUC and F1 (plus EER and other threshold metrics).
+
+## Results
+
+Measured results from the saved evaluation artifacts:
+
+| Model | Recall@1 | Recall@3 | Recall@5 | Cross-color Recall@1 | Verification ROC-AUC | Verification F1 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Grayscale ResNet18 baseline | 0.3611 | 0.8750 | 1.0000 | 0.3958 | 0.9914 | 0.3186 |
+| Trained color-augmentation model | 0.3611 | 0.9167 | 1.0000 | 0.3958 | 0.9951 | 0.5455 |
+
+The evaluation set is small (6 queries and 108 verification pairs, including 18 positives), so these results should be interpreted as descriptive rather than as a statistically strong estimate of generalization. They do not establish statistical significance or general performance superiority. See [reports/experiment_results.md](reports/experiment_results.md) for additional metrics and threshold details.
+
+## Efficiency
+
+Measured from the trained checkpoint with `scripts/measure_efficiency.py`, using a deterministic 1x3x224x224 tensor, 20 warmups, 100 timed runs, and one CPU thread:
+
+| Metric | Value |
+| --- | --- |
+| Backbone | ResNet18Embedding |
+| Embedding dimension | 128 |
+| Total parameters | 11,340,736 |
+| Trainable parameters | 164,224 |
+| CPU forward latency | 116.56 ms median (117.85 ms mean) |
+| FLOPs/MACs | Not reported; no profiler dependency added |
+
+Latency is a local measurement on Windows 11 with PyTorch 2.14.1+cpu and an Intel64 CPU; it covers model forward only and excludes image decoding/preprocessing. It is not a universal benchmark. Re-measure on the target machine with the command in the reproduction section.
+
+## Reproduce the Reported Experiment
+
+Keep the proprietary DeepLure dataset outside this repository at `$env:USERPROFILE\DeepLureData\deeplure`. Do not copy it into Git, commit it, upload it, or redistribute it. Install the basic dataset dependencies and model/evaluation dependencies with:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-similarity.txt
+```
+
+The current `requirements.txt` also contains the model/evaluation packages, while `requirements-similarity.txt` includes it; the commands are separated by workflow, but currently resolve to overlapping dependencies. Validate the prepared metadata first:
+
+```powershell
+python scripts/validate_dataset.py `
+  --metadata metadata\image_metadata.csv `
+  --deeplure-root "$env:USERPROFILE\DeepLureData\deeplure"
+```
+
+Train from the saved train/validation splits:
 
 ```powershell
 python scripts/train_embedding.py `
@@ -121,13 +184,25 @@ python scripts/train_embedding.py `
   --device cpu
 ```
 
-The best checkpoint is written to `local_outputs/model/best_model.pt`; the training configuration and loss history are saved beside it. `local_outputs/` is intentionally ignored by Git because it contains local model and evaluation artifacts. Do not commit those artifacts.
+Evaluate both the grayscale baseline and trained checkpoint:
 
-The workflow is: install basic dependencies, install model dependencies, prepare and validate metadata/splits using the sections above, train from the train and validation CSVs, then evaluate against the held-out gallery, query, and verification pairs. Training does not load the evaluation images or labels.
+```powershell
+python scripts/evaluate_retrieval.py `
+  --deeplure-root "$env:USERPROFILE\DeepLureData\deeplure" `
+  --checkpoint local_outputs\model\best_model.pt `
+  --mode both `
+  --output-dir local_outputs\evaluation `
+  --device cpu `
+  --batch-size 16
+```
 
-Evaluation compares the grayscale ResNet18 baseline with the trained color-augmentation model. Retrieval metrics include Recall@1/3/5 and MRR; verification metrics include ROC-AUC, EER, and threshold-based precision/recall/F1. The cosine threshold is selected on validation pairs, not evaluation pairs.
+Measure checkpoint efficiency locally:
 
-In the measured task experiment, both models had Recall@1 0.3611 and cross-color Recall@1 0.3958. The trained model had Recall@3 0.9167 versus 0.8750 for the grayscale baseline, and ROC-AUC 0.9951 versus 0.9914. These are results for this split, not a general performance claim: evaluation contained only 6 queries and 108 verification pairs. See [reports/experiment_results.md](reports/experiment_results.md) for the comparison and caveats.
+```powershell
+python scripts/measure_efficiency.py --checkpoint local_outputs\model\best_model.pt
+```
+
+The test and Git-safety commands are in [Tests and Git Safety](#tests-and-git-safety). `local_outputs/` is ignored by Git; keep checkpoints and generated evaluation artifacts there and do not commit them.
 
 ## Optional Similarity Suggestions
 
